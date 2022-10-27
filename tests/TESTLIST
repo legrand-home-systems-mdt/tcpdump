@@ -855,3 +855,6 @@ lsp-ping-timestamp	lsp-ping-timestamp.pcap		lsp-ping-timestamp.out	-vv
 
 # lwres with "extra" bytes
 lwres_with_extra lwres_with_extra.pcap lwres_with_extra.out
+
+# Overview tests
+overview    overview.pcap      overview.out    -o
