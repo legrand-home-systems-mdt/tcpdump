@@ -221,6 +221,7 @@ static int Jflag;			/* list available time stamp types */
 static int jflag = -1;			/* packet time stamp source */
 #endif
 static int lflag;			/* line-buffered output */
+static int overviewFlag;	/* overview mode */
 static int pflag;			/* don't go promiscuous */
 #ifdef HAVE_PCAP_SETDIRECTION
 static int Qflag = -1;			/* restrict captured packet by send/receive direction */
@@ -239,6 +240,21 @@ static int count_mode;
 
 static int infodelay;
 static int infoprint;
+
+#define MAX_ADDR_LEN 100
+
+struct endpoint_stats {
+	char src[MAX_ADDR_LEN];
+	char dst[MAX_ADDR_LEN];
+	u_int64_t kilobytes;
+	u_int64_t bytes;
+	u_int64_t packets;
+};
+
+#define MAX_ENDPOINT_PAIRS 1000
+
+static struct endpoint_stats endpoint_overview_stats[MAX_ENDPOINT_PAIRS];
+static int endpoint_overview_stats_len = 0;
 
 char *program_name;
 
@@ -262,10 +278,16 @@ static NORETURN void show_devices_and_exit(void);
 static NORETURN void show_remote_devices_and_exit(void);
 #endif
 
+static void capture_packet_overview(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void print_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void dump_packet_and_trunc(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void dump_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void droproot(const char *, const char *);
+
+static void add_to_endpoint_statistics(const char* src, const char* dst, int packet_bytes);
+static void print_with_spaces(const char* str, size_t padding_len, int prefix_spaces);
+static size_t count_digits(u_int64_t n);
+static void print_endpoint_statistics(void);
 
 #ifdef SIGNAL_REQ_INFO
 static void requestinfo(int);
@@ -284,6 +306,7 @@ static void flushpcap(int);
 
 static void info(int);
 static u_int packets_captured;
+static u_int64_t bytes_captured;
 
 #ifdef HAVE_PCAP_FINDALLDEVS
 static const struct tok status_flags[] = {
@@ -672,7 +695,7 @@ show_remote_devices_and_exit(void)
 #define U_FLAG
 #endif
 
-#define SHORTOPTS "aAb" B_FLAG "c:C:d" D_FLAG "eE:fF:G:hHi:" I_FLAG j_FLAG J_FLAG "KlLm:M:nNOpq" Q_FLAG "r:s:StT:u" U_FLAG "vV:w:W:xXy:Yz:Z:#"
+#define SHORTOPTS "aAb" B_FLAG "c:C:d" D_FLAG "eE:fF:G:hHi:" I_FLAG j_FLAG J_FLAG "KlLm:M:nNoOpq" Q_FLAG "r:s:StT:u" U_FLAG "vV:w:W:xXy:Yz:Z:#"
 
 /*
  * Long options.
@@ -1730,6 +1753,10 @@ main(int argc, char **argv)
 			++ndo->ndo_Nflag;
 			break;
 
+		case 'o':
+			++overviewFlag;
+			break;
+
 		case 'O':
 			Oflag = 0;
 			break;
@@ -2455,6 +2482,11 @@ DIAG_ON_ASSIGN_ENUM
 		if (Uflag)
 			pcap_dump_flush(pdd);
 #endif
+	} else if (overviewFlag) {
+		dlt = pcap_datalink(pd);
+		ndo->ndo_if_printer = get_if_printer(dlt);
+		callback = capture_packet_overview;
+		pcap_userdata = (u_char *)ndo;
 	} else {
 		dlt = pcap_datalink(pd);
 		ndo->ndo_if_printer = get_if_printer(dlt);
@@ -2665,6 +2697,11 @@ DIAG_ON_ASSIGN_ENUM
 	if (count_mode && RFileName != NULL)
 		fprintf(stdout, "%u packet%s\n", packets_captured,
 			PLURAL_SUFFIX(packets_captured));
+
+	/* If overview mode was specified, print the overview */
+	if (overviewFlag) {
+		print_endpoint_statistics();
+	}
 
 	free(cmdbuf);
 	pcap_freecode(&fcode);
@@ -3111,6 +3148,133 @@ print_packet(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
 	--infodelay;
 	if (infoprint)
 		info(0);
+}
+
+static void
+capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
+{
+	const struct ip* ipPacket;
+	netdissect_options* ndo;
+
+	++packets_captured;
+
+	if (h && sp && user) {
+		ipPacket = (const struct ip*)(sp + 14);
+		ndo = (netdissect_options*)user;
+		add_to_endpoint_statistics(
+				ipaddr_string(ndo, ipPacket->ip_src),
+				ipaddr_string(ndo, ipPacket->ip_dst),
+				h->len);
+	}
+}
+
+static void add_to_endpoint_statistics(const char* src, const char* dst, int packet_bytes)
+{
+	struct endpoint_stats* stats = NULL;
+
+	// Add to the total bytes
+	bytes_captured += packet_bytes;
+
+	// Lookup src and dst strings in overview_stats.
+	for (int i = 0; i < endpoint_overview_stats_len && stats == NULL; i++) {
+		if (!strcmp(endpoint_overview_stats[i].src, src) && !strcmp(endpoint_overview_stats[i].dst, dst)) {
+			stats = &endpoint_overview_stats[i];
+		}
+	}
+
+	// Add a new array element if needed.
+	if (!stats && endpoint_overview_stats_len < MAX_ENDPOINT_PAIRS) {
+		endpoint_overview_stats_len++;
+		stats = &endpoint_overview_stats[endpoint_overview_stats_len - 1];
+		strncpy(stats->src, src, MAX_ADDR_LEN);
+		stats->src[MAX_ADDR_LEN - 1] = 0;
+		strncpy(stats->dst, dst, MAX_ADDR_LEN);
+		stats->dst[MAX_ADDR_LEN - 1] = 0;
+	}
+
+	// Add to the stats.
+	if (stats) {
+		stats->packets++;
+		stats->bytes += packet_bytes;
+	}
+}
+
+void print_with_spaces(const char* str, size_t padding_len, int prefix_spaces_flag)
+{
+	size_t spaces = 0;
+
+	if (!prefix_spaces_flag) printf("%s", str);
+
+	spaces = padding_len - strlen(str);
+	while (spaces) {
+		printf(" ");
+		spaces--;
+	}
+
+	if (prefix_spaces_flag) printf("%s", str);
+}
+
+size_t count_digits(u_int64_t n)
+{
+    size_t count = 0;
+
+    if (n == 0)
+        return 1;
+    while (n != 0) {
+        n = n / 10;
+        ++count;
+    }
+    return count;
+}
+
+void print_endpoint_statistics(void)
+{
+	struct endpoint_stats* stats = NULL;
+	size_t max_src_len = strlen("SRC");
+	size_t max_dst_len = strlen("DST");
+	size_t max_packets_len = strlen("PACKETS");
+	size_t max_bytes_len = strlen("BYTES");
+	size_t len = 0;
+	char str[MAX_ADDR_LEN];
+
+	printf("\nOVERVIEW\n--------\npackets_captured: %d\nbytes_captured: %ld\n\n", packets_captured, bytes_captured);
+
+	for (int i = 0; i < endpoint_overview_stats_len; i++) {
+		stats = &endpoint_overview_stats[i];
+		if ((len = strlen(stats->src)) > max_src_len) {
+			max_src_len = len;
+		}
+		if ((len = strlen(stats->dst)) > max_dst_len) {
+			max_dst_len = len;
+		}
+		if ((len = count_digits(stats->packets)) > max_packets_len) {
+			max_packets_len = len;
+		}
+		if ((len = count_digits(stats->bytes)) > max_bytes_len) {
+			max_bytes_len = len;
+		}
+	}
+
+	print_with_spaces("SRC", max_src_len + 1, 0);
+	print_with_spaces("DST", max_dst_len + 1, 0);
+	print_with_spaces("PACKETS", max_packets_len + 1, 1);
+	print_with_spaces("BYTES", max_bytes_len + 1, 1);
+	printf("\n");
+
+	for (int i = 0; i < endpoint_overview_stats_len; i++) {
+		stats = &endpoint_overview_stats[i];
+
+		print_with_spaces(stats->src, max_src_len + 1, 0);
+		print_with_spaces(stats->dst, max_dst_len + 1, 0);
+
+		sprintf(str, "%ld", stats->packets);
+		print_with_spaces(str, max_packets_len + 1, 1);
+
+		sprintf(str, "%ld", stats->bytes);
+		print_with_spaces(str, max_bytes_len + 1, 1);					
+
+		printf("\n");
+	}
 }
 
 #ifdef SIGNAL_REQ_INFO
