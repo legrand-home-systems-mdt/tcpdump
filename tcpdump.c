@@ -255,6 +255,8 @@ struct endpoint_stats {
 
 static struct endpoint_stats endpoint_overview_stats[MAX_ENDPOINT_PAIRS];
 static int endpoint_overview_stats_len = 0;
+static struct timeval capture_start_time;
+static struct timeval capture_end_time;
 
 char *program_name;
 
@@ -3159,6 +3161,12 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 	++packets_captured;
 
 	if (h && sp && user) {
+
+		if (capture_start_time.tv_sec == 0)
+			capture_start_time.tv_sec = h->ts.tv_sec;
+
+		capture_end_time.tv_sec = h->ts.tv_sec;
+
 		ipPacket = (const struct ip*)(sp + 14);
 		ndo = (netdissect_options*)user;
 		add_to_endpoint_statistics(
@@ -3237,7 +3245,20 @@ void print_endpoint_statistics(void)
 	size_t len = 0;
 	char str[MAX_ADDR_LEN];
 
-	printf("\nOVERVIEW\n--------\npackets_captured: %d\nbytes_captured: %ld\n\n", packets_captured, bytes_captured);
+	struct timeval delta_time;
+	double hours;
+
+	delta_time.tv_sec = capture_end_time.tv_sec - capture_start_time.tv_sec;
+	hours = (double)delta_time.tv_sec / 3600.0;
+
+	printf("\n");
+	printf("OVERVIEW\n");
+	printf("--------\n");
+	printf("packets_captured: %d\n", packets_captured);
+	printf("bytes_captured: %ld\n", bytes_captured);
+	printf("seconds: %ld\n", delta_time.tv_sec);
+	printf("hours: %2.2f\n", hours);
+	printf("\n");
 
 	for (int i = 0; i < endpoint_overview_stats_len; i++) {
 		stats = &endpoint_overview_stats[i];
