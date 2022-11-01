@@ -167,6 +167,8 @@ The Regents of the University of California.  All rights reserved.\n";
 
 #include "fptype.h"
 
+#include "ethertype.h"
+
 #ifndef PATH_MAX
 #define PATH_MAX 1024
 #endif
@@ -257,6 +259,12 @@ static struct endpoint_stats endpoint_overview_stats[MAX_ENDPOINT_PAIRS];
 static int endpoint_overview_stats_len = 0;
 static struct timeval capture_start_time;
 static struct timeval capture_end_time;
+
+// Column headers for overview option
+#define COLUMN_HEADER_SRC "SRC"
+#define COLUMN_HEADER_DST "DST"
+#define COLUMN_HEADER_PACKETS "PACKETS"
+#define COLUMN_HEADER_BYTES "BYTES"
 
 char *program_name;
 
@@ -1491,7 +1499,6 @@ main(int argc, char **argv)
 	char *cp, *infile, *cmdbuf, *device, *RFileName, *VFileName, *WFileName;
 	char *endp;
 	pcap_handler callback;
-	int dlt;
 	const char *dlt_name;
 	struct bpf_program fcode;
 #ifndef _WIN32
@@ -1541,7 +1548,7 @@ main(int argc, char **argv)
 	VFileName = NULL;
 	VFile = NULL;
 	WFileName = NULL;
-	dlt = -1;
+	ndo->ndo_dlt = -1;
 	if ((cp = strrchr(argv[0], PATH_SEPARATOR)) != NULL)
 		ndo->program_name = program_name = cp + 1;
 	else
@@ -2094,18 +2101,18 @@ main(int argc, char **argv)
 			error("unable to limit pcap descriptor");
 		}
 #endif
-		dlt = pcap_datalink(pd);
-		dlt_name = pcap_datalink_val_to_name(dlt);
+		ndo->ndo_dlt = pcap_datalink(pd);
+		dlt_name = pcap_datalink_val_to_name(ndo->ndo_dlt);
 		fprintf(stderr, "reading from file %s", RFileName);
 		if (dlt_name == NULL) {
-			fprintf(stderr, ", link-type %u", dlt);
+			fprintf(stderr, ", link-type %u", ndo->ndo_dlt);
 		} else {
 			fprintf(stderr, ", link-type %s (%s)", dlt_name,
-				pcap_datalink_val_to_description(dlt));
+				pcap_datalink_val_to_description(ndo->ndo_dlt));
 		}
 		fprintf(stderr, ", snapshot length %d\n", pcap_snapshot(pd));
 #ifdef DLT_LINUX_SLL2
-		if (dlt == DLT_LINUX_SLL2)
+		if (ndo->ndo_dlt == DLT_LINUX_SLL2)
 			fprintf(stderr, "Warning: interface names might be incorrect\n");
 #endif
 	} else if (dflag && !device) {
@@ -2474,8 +2481,8 @@ DIAG_ON_ASSIGN_ENUM
 			pcap_userdata = (u_char *)&dumpinfo;
 		}
 		if (print) {
-			dlt = pcap_datalink(pd);
-			ndo->ndo_if_printer = get_if_printer(dlt);
+			ndo->ndo_dlt = pcap_datalink(pd);
+			ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
 			dumpinfo.ndo = ndo;
 		} else
 			dumpinfo.ndo = NULL;
@@ -2485,13 +2492,13 @@ DIAG_ON_ASSIGN_ENUM
 			pcap_dump_flush(pdd);
 #endif
 	} else if (overviewFlag) {
-		dlt = pcap_datalink(pd);
-		ndo->ndo_if_printer = get_if_printer(dlt);
+		ndo->ndo_dlt = pcap_datalink(pd);
+		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
 		callback = capture_packet_overview;
 		pcap_userdata = (u_char *)ndo;
 	} else {
-		dlt = pcap_datalink(pd);
-		ndo->ndo_if_printer = get_if_printer(dlt);
+		ndo->ndo_dlt = pcap_datalink(pd);
+		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
 		callback = print_packet;
 		pcap_userdata = (u_char *)ndo;
 	}
@@ -2557,14 +2564,14 @@ DIAG_ON_ASSIGN_ENUM
 			    program_name);
 		} else
 			(void)fprintf(stderr, "%s: ", program_name);
-		dlt = pcap_datalink(pd);
-		dlt_name = pcap_datalink_val_to_name(dlt);
+		ndo->ndo_dlt = pcap_datalink(pd);
+		dlt_name = pcap_datalink_val_to_name(ndo->ndo_dlt);
 		(void)fprintf(stderr, "listening on %s", device);
 		if (dlt_name == NULL) {
-			(void)fprintf(stderr, ", link-type %u", dlt);
+			(void)fprintf(stderr, ", link-type %u", ndo->ndo_dlt);
 		} else {
 			(void)fprintf(stderr, ", link-type %s (%s)", dlt_name,
-				      pcap_datalink_val_to_description(dlt));
+				      pcap_datalink_val_to_description(ndo->ndo_dlt));
 		}
 		(void)fprintf(stderr, ", snapshot length %d bytes\n", ndo->ndo_snaplen);
 		(void)fflush(stderr);
@@ -2638,7 +2645,7 @@ DIAG_ON_ASSIGN_ENUM
 				}
 #endif
 				new_dlt = pcap_datalink(pd);
-				if (new_dlt != dlt) {
+				if (new_dlt != ndo->ndo_dlt) {
 					/*
 					 * The new file has a different
 					 * link-layer header type from the
@@ -2666,8 +2673,8 @@ DIAG_ON_ASSIGN_ENUM
 					 * and recompile the filter with
 					 * the new DLT.
 					 */
-					dlt = new_dlt;
-					ndo->ndo_if_printer = get_if_printer(dlt);
+					ndo->ndo_dlt = new_dlt;
+					ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
 					if (pcap_compile(pd, &fcode, cmdbuf, Oflag, netmask) < 0)
 						error("%s", pcap_geterr(pd));
 				}
@@ -2681,14 +2688,14 @@ DIAG_ON_ASSIGN_ENUM
 				/*
 				 * Report the new file.
 				 */
-				dlt_name = pcap_datalink_val_to_name(dlt);
+				dlt_name = pcap_datalink_val_to_name(ndo->ndo_dlt);
 				fprintf(stderr, "reading from file %s", RFileName);
 				if (dlt_name == NULL) {
-					fprintf(stderr, ", link-type %u", dlt);
+					fprintf(stderr, ", link-type %u", ndo->ndo_dlt);
 				} else {
 					fprintf(stderr, ", link-type %s (%s)",
 						dlt_name,
-						pcap_datalink_val_to_description(dlt));
+						pcap_datalink_val_to_description(ndo->ndo_dlt));
 				}
 				fprintf(stderr, ", snapshot length %d\n", pcap_snapshot(pd));
 			}
@@ -3161,18 +3168,21 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 	++packets_captured;
 
 	if (h && sp && user) {
-
-		if (capture_start_time.tv_sec == 0)
-			capture_start_time.tv_sec = h->ts.tv_sec;
-
-		capture_end_time.tv_sec = h->ts.tv_sec;
-
-		ipPacket = (const struct ip*)(sp + 14);
 		ndo = (netdissect_options*)user;
-		add_to_endpoint_statistics(
-				ipaddr_string(ndo, ipPacket->ip_src),
-				ipaddr_string(ndo, ipPacket->ip_dst),
-				h->len);
+
+		if (ndo->ndo_dlt == DLT_EN10MB) {
+			
+			if (capture_start_time.tv_sec == 0)
+				capture_start_time.tv_sec = h->ts.tv_sec;
+
+			capture_end_time.tv_sec = h->ts.tv_sec;
+
+			ipPacket = (const struct ip*)(sp + ETHER_HDRLEN);
+			add_to_endpoint_statistics(
+					ipaddr_string(ndo, ipPacket->ip_src),
+					ipaddr_string(ndo, ipPacket->ip_dst),
+					h->len);
+		}
 	}
 }
 
@@ -3238,10 +3248,10 @@ size_t count_digits(u_int64_t n)
 void print_endpoint_statistics(void)
 {
 	struct endpoint_stats* stats = NULL;
-	size_t max_src_len = strlen("SRC");
-	size_t max_dst_len = strlen("DST");
-	size_t max_packets_len = strlen("PACKETS");
-	size_t max_bytes_len = strlen("BYTES");
+	size_t max_src_len = strlen(COLUMN_HEADER_SRC);
+	size_t max_dst_len = strlen(COLUMN_HEADER_DST);
+	size_t max_packets_len = strlen(COLUMN_HEADER_PACKETS);
+	size_t max_bytes_len = strlen(COLUMN_HEADER_BYTES);
 	size_t len = 0;
 	char str[MAX_ADDR_LEN];
 
@@ -3276,10 +3286,10 @@ void print_endpoint_statistics(void)
 		}
 	}
 
-	print_with_spaces("SRC", max_src_len + 1, 0);
-	print_with_spaces("DST", max_dst_len + 1, 0);
-	print_with_spaces("PACKETS", max_packets_len + 1, 1);
-	print_with_spaces("BYTES", max_bytes_len + 1, 1);
+	print_with_spaces(COLUMN_HEADER_SRC, max_src_len + 1, 0);
+	print_with_spaces(COLUMN_HEADER_DST, max_dst_len + 1, 0);
+	print_with_spaces(COLUMN_HEADER_PACKETS, max_packets_len + 1, 1);
+	print_with_spaces(COLUMN_HEADER_BYTES, max_bytes_len + 1, 1);
 	printf("\n");
 
 	for (int i = 0; i < endpoint_overview_stats_len; i++) {
