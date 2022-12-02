@@ -223,7 +223,8 @@ static int Jflag;			/* list available time stamp types */
 static int jflag = -1;			/* packet time stamp source */
 #endif
 static int lflag;			/* line-buffered output */
-static int overviewFlag;	/* overview mode */
+static int overviewFlag = 0;	/* overview mode */
+static int noPrintFlag = 0;		/* don't print packets */
 static int pflag;			/* don't go promiscuous */
 #ifdef HAVE_PCAP_SETDIRECTION
 static int Qflag = -1;			/* restrict captured packet by send/receive direction */
@@ -704,7 +705,7 @@ show_remote_devices_and_exit(void)
 #define U_FLAG
 #endif
 
-#define SHORTOPTS "aAb" B_FLAG "c:C:d" D_FLAG "eE:fF:G:hHi:" I_FLAG j_FLAG J_FLAG "KlLm:M:nNoOpq" Q_FLAG "r:s:StT:u" U_FLAG "vV:w:W:xXy:Yz:Z:#"
+#define SHORTOPTS "aAb" B_FLAG "c:C:d" D_FLAG "eE:fF:G:hHi:" I_FLAG j_FLAG J_FLAG "KlLm:M:nNOpq" Q_FLAG "r:s:StT:u" U_FLAG "vV:w:W:xXy:Yz:Z:#"
 
 /*
  * Long options.
@@ -735,6 +736,8 @@ show_remote_devices_and_exit(void)
 #define OPTION_TSTAMP_NANO		134
 #define OPTION_FP_TYPE			135
 #define OPTION_COUNT			136
+#define OPTION_OVERVIEW			137
+#define OPTION_NO_PRINT			138
 
 static const struct option longopts[] = {
 #if defined(HAVE_PCAP_CREATE) || defined(_WIN32)
@@ -783,6 +786,8 @@ static const struct option longopts[] = {
 	{ "number", no_argument, NULL, '#' },
 	{ "print", no_argument, NULL, OPTION_PRINT },
 	{ "version", no_argument, NULL, OPTION_VERSION },
+	{ "overview", no_argument, NULL, OPTION_OVERVIEW },
+	{ "no-print", no_argument, NULL, OPTION_NO_PRINT },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1767,10 +1772,6 @@ main(int argc, char **argv)
 			++ndo->ndo_Nflag;
 			break;
 
-		case 'o':
-			++overviewFlag;
-			break;
-
 		case 'O':
 			Oflag = 0;
 			break;
@@ -1975,6 +1976,14 @@ main(int argc, char **argv)
 
 		case OPTION_COUNT:
 			count_mode = 1;
+			break;
+
+		case OPTION_OVERVIEW:
+			overviewFlag = 1;
+			break;
+
+		case OPTION_NO_PRINT:
+			noPrintFlag = 1;
 			break;
 
 		default:
@@ -2500,8 +2509,9 @@ DIAG_ON_ASSIGN_ENUM
 		ndo->ndo_dlt = pcap_datalink(pd);
 		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
 
-		if (overviewFlag) {
-			ndo->ndo_printf = no_printf; /* Override the printf function to suppress printing all packets */
+		/* If no printing of packets is desired, override the printf function to suppress printing packets */
+		if (noPrintFlag) {
+			ndo->ndo_printf = no_printf;
 		}
 
 		callback = print_packet;
