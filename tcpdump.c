@@ -3172,14 +3172,12 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 	const struct ip* ipPacket;
 	netdissect_options* ndo;
 
-	++packets_captured;
-
+	// Need to print to be able to get ndo_ll_hdr_len		
+	print_packet(user, h, sp);
+	
 	if (h && sp && user) {
 		ndo = (netdissect_options*)user;
 		
-		// Need to print for now to be able to get ndo_ll_hdr_len
-		pretty_print_packet(ndo, h, sp, packets_captured);
-
 		if (ndo->ndo_dlt == DLT_EN10MB) {
 			
 			if (capture_start_time.tv_sec == 0)
