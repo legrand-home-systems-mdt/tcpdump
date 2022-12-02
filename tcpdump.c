@@ -168,6 +168,8 @@ The Regents of the University of California.  All rights reserved.\n";
 #include "fptype.h"
 
 #include "ethertype.h"
+#include "tcp.h"
+#include "udp.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024
@@ -3173,7 +3175,9 @@ print_packet(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
 	   between each src/dst pair for each ethernet packet. */
 	if (overviewFlag && h && sp && user) {
 		const struct ip* ipPacket;
+		const struct udphdr* udpHeader;
 		netdissect_options* ndo;
+		uint16_t sport, dport;
 
 		ndo = (netdissect_options*)user;
 		
@@ -3186,6 +3190,18 @@ print_packet(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
 
 			ipPacket = (const struct ip*)(sp + ndo->ndo_ll_hdr_len);
 			
+			if (EXTRACT_U_1(ipPacket->ip_p) == IPPROTO_UDP) {
+				udpHeader = (const struct udphdr*)(sp + ETHER_HDRLEN + (sizeof(struct ip)));
+				sport = EXTRACT_BE_U_2(udpHeader->uh_sport);
+				dport = EXTRACT_BE_U_2(udpHeader->uh_dport);
+
+				printf("UDP: %d -> %d\n", sport, dport);
+				
+				if (sport == NAMESERVER_PORT) {
+					printf("NAMESERVER_PORT\n");
+				}
+			}
+
 			add_to_endpoint_statistics(
 					ipaddr_string(ndo, ipPacket->ip_src),
 					ipaddr_string(ndo, ipPacket->ip_dst),
