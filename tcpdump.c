@@ -3436,4 +3436,6 @@ print_usage(FILE *f)
 #endif
 	(void)fprintf(f,
 "\t\t[ -z postrotate-command ] [ -Z user ] [ expression ]\n");
+	(void)fprintf(f,
+"\t\t[ --overview ] [ --no-print ]\n");
 }
