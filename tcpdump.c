@@ -3164,8 +3164,6 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 {
 	const struct ip* ipPacket;
 	netdissect_options* ndo;
-	const char* src;
-	int i;
 
 	++packets_captured;
 
@@ -3184,10 +3182,8 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 
 			ipPacket = (const struct ip*)(sp + ndo->ndo_ll_hdr_len);
 			
-			src = ipaddr_string(ndo, ipPacket->ip_src);
-					
 			add_to_endpoint_statistics(
-					src,
+					ipaddr_string(ndo, ipPacket->ip_src),
 					ipaddr_string(ndo, ipPacket->ip_dst),
 					h->len);
 		}
