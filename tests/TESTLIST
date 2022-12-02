@@ -857,4 +857,7 @@ lsp-ping-timestamp	lsp-ping-timestamp.pcap		lsp-ping-timestamp.out	-vv
 lwres_with_extra lwres_with_extra.pcap lwres_with_extra.out
 
 # Overview tests
-overview    overview.pcap      overview.out    -o
+overview1    overview.pcap      overview1.out    --overview --no-print
+overview2    overview.pcap      overview2.out    --overview -t
+overview3    overview.pcap      overview3.out    --no-print
+
