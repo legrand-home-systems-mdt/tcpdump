@@ -223,7 +223,8 @@ static int Jflag;			/* list available time stamp types */
 static int jflag = -1;			/* packet time stamp source */
 #endif
 static int lflag;			/* line-buffered output */
-static int overviewFlag;	/* overview mode */
+static int overviewFlag = 0;	/* overview mode */
+static int noPrintFlag = 0;		/* don't print packets */
 static int pflag;			/* don't go promiscuous */
 #ifdef HAVE_PCAP_SETDIRECTION
 static int Qflag = -1;			/* restrict captured packet by send/receive direction */
@@ -288,7 +289,6 @@ static NORETURN void show_devices_and_exit(void);
 static NORETURN void show_remote_devices_and_exit(void);
 #endif
 
-static void capture_packet_overview(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void print_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void dump_packet_and_trunc(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void dump_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
@@ -705,7 +705,7 @@ show_remote_devices_and_exit(void)
 #define U_FLAG
 #endif
 
-#define SHORTOPTS "aAb" B_FLAG "c:C:d" D_FLAG "eE:fF:G:hHi:" I_FLAG j_FLAG J_FLAG "KlLm:M:nNoOpq" Q_FLAG "r:s:StT:u" U_FLAG "vV:w:W:xXy:Yz:Z:#"
+#define SHORTOPTS "aAb" B_FLAG "c:C:d" D_FLAG "eE:fF:G:hHi:" I_FLAG j_FLAG J_FLAG "KlLm:M:nNOpq" Q_FLAG "r:s:StT:u" U_FLAG "vV:w:W:xXy:Yz:Z:#"
 
 /*
  * Long options.
@@ -736,6 +736,8 @@ show_remote_devices_and_exit(void)
 #define OPTION_TSTAMP_NANO		134
 #define OPTION_FP_TYPE			135
 #define OPTION_COUNT			136
+#define OPTION_OVERVIEW			137
+#define OPTION_NO_PRINT			138
 
 static const struct option longopts[] = {
 #if defined(HAVE_PCAP_CREATE) || defined(_WIN32)
@@ -784,6 +786,8 @@ static const struct option longopts[] = {
 	{ "number", no_argument, NULL, '#' },
 	{ "print", no_argument, NULL, OPTION_PRINT },
 	{ "version", no_argument, NULL, OPTION_VERSION },
+	{ "overview", no_argument, NULL, OPTION_OVERVIEW },
+	{ "no-print", no_argument, NULL, OPTION_NO_PRINT },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1491,6 +1495,12 @@ open_interface(const char *device, netdissect_options *ndo, char *ebuf)
 	return (pc);
 }
 
+static int
+no_printf(netdissect_options *ndo, const char *fmt, ...)
+{
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1762,10 +1772,6 @@ main(int argc, char **argv)
 			++ndo->ndo_Nflag;
 			break;
 
-		case 'o':
-			++overviewFlag;
-			break;
-
 		case 'O':
 			Oflag = 0;
 			break;
@@ -1970,6 +1976,14 @@ main(int argc, char **argv)
 
 		case OPTION_COUNT:
 			count_mode = 1;
+			break;
+
+		case OPTION_OVERVIEW:
+			overviewFlag = 1;
+			break;
+
+		case OPTION_NO_PRINT:
+			noPrintFlag = 1;
 			break;
 
 		default:
@@ -2491,14 +2505,15 @@ DIAG_ON_ASSIGN_ENUM
 		if (Uflag)
 			pcap_dump_flush(pdd);
 #endif
-	} else if (overviewFlag) {
-		ndo->ndo_dlt = pcap_datalink(pd);
-		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
-		callback = capture_packet_overview;
-		pcap_userdata = (u_char *)ndo;
 	} else {
 		ndo->ndo_dlt = pcap_datalink(pd);
 		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
+
+		/* If no printing of packets is desired, override the printf function to suppress printing packets */
+		if (noPrintFlag) {
+			ndo->ndo_printf = no_printf;
+		}
+
 		callback = print_packet;
 		pcap_userdata = (u_char *)ndo;
 	}
@@ -3154,22 +3169,14 @@ print_packet(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
 	if (!count_mode)
 		pretty_print_packet((netdissect_options *)user, h, sp, packets_captured);
 
-	--infodelay;
-	if (infoprint)
-		info(0);
-}
+	/* If overview mode was selected on the command line, store the statistics
+	   between each src/dst pair for each ethernet packet. */
+	if (overviewFlag && h && sp && user) {
+		const struct ip* ipPacket;
+		netdissect_options* ndo;
 
-static void
-capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
-{
-	const struct ip* ipPacket;
-	netdissect_options* ndo;
-
-	++packets_captured;
-
-	if (h && sp && user) {
 		ndo = (netdissect_options*)user;
-
+		
 		if (ndo->ndo_dlt == DLT_EN10MB) {
 			
 			if (capture_start_time.tv_sec == 0)
@@ -3177,13 +3184,18 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 
 			capture_end_time.tv_sec = h->ts.tv_sec;
 
-			ipPacket = (const struct ip*)(sp + ETHER_HDRLEN);
+			ipPacket = (const struct ip*)(sp + ndo->ndo_ll_hdr_len);
+			
 			add_to_endpoint_statistics(
 					ipaddr_string(ndo, ipPacket->ip_src),
 					ipaddr_string(ndo, ipPacket->ip_dst),
 					h->len);
 		}
-	}
+	}		
+
+	--infodelay;
+	if (infoprint)
+		info(0);
 }
 
 static void add_to_endpoint_statistics(const char* src, const char* dst, int packet_bytes)
@@ -3426,4 +3438,6 @@ print_usage(FILE *f)
 #endif
 	(void)fprintf(f,
 "\t\t[ -z postrotate-command ] [ -Z user ] [ expression ]\n");
+	(void)fprintf(f,
+"\t\t[ --overview ] [ --no-print ]\n");
 }
