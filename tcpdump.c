@@ -288,7 +288,6 @@ static NORETURN void show_devices_and_exit(void);
 static NORETURN void show_remote_devices_and_exit(void);
 #endif
 
-static void capture_packet_overview(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void print_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void dump_packet_and_trunc(u_char *, const struct pcap_pkthdr *, const u_char *);
 static void dump_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
@@ -2497,15 +2496,14 @@ DIAG_ON_ASSIGN_ENUM
 		if (Uflag)
 			pcap_dump_flush(pdd);
 #endif
-	} else if (overviewFlag) {
-		ndo->ndo_dlt = pcap_datalink(pd);
-		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
-		ndo->ndo_printf = no_printf; /* Override the printf function to suppress printing */
-		callback = capture_packet_overview;
-		pcap_userdata = (u_char *)ndo;
 	} else {
 		ndo->ndo_dlt = pcap_datalink(pd);
 		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
+
+		if (overviewFlag) {
+			ndo->ndo_printf = no_printf; /* Override the printf function to suppress printing all packets */
+		}
+
 		callback = print_packet;
 		pcap_userdata = (u_char *)ndo;
 	}
@@ -3161,21 +3159,12 @@ print_packet(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
 	if (!count_mode)
 		pretty_print_packet((netdissect_options *)user, h, sp, packets_captured);
 
-	--infodelay;
-	if (infoprint)
-		info(0);
-}
+	/* If overview mode was selected on the command line, store the statistics
+	   between each src/dst pair for each ethernet packet. */
+	if (overviewFlag && h && sp && user) {
+		const struct ip* ipPacket;
+		netdissect_options* ndo;
 
-static void
-capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char *sp)
-{
-	const struct ip* ipPacket;
-	netdissect_options* ndo;
-
-	// Need to print to be able to get ndo_ll_hdr_len		
-	print_packet(user, h, sp);
-	
-	if (h && sp && user) {
 		ndo = (netdissect_options*)user;
 		
 		if (ndo->ndo_dlt == DLT_EN10MB) {
@@ -3192,7 +3181,11 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 					ipaddr_string(ndo, ipPacket->ip_dst),
 					h->len);
 		}
-	}
+	}		
+
+	--infodelay;
+	if (infoprint)
+		info(0);
 }
 
 static void add_to_endpoint_statistics(const char* src, const char* dst, int packet_bytes)
