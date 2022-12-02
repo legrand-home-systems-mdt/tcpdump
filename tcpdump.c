@@ -1491,6 +1491,12 @@ open_interface(const char *device, netdissect_options *ndo, char *ebuf)
 	return (pc);
 }
 
+static int
+no_printf(netdissect_options *ndo, const char *fmt, ...)
+{
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -2494,6 +2500,7 @@ DIAG_ON_ASSIGN_ENUM
 	} else if (overviewFlag) {
 		ndo->ndo_dlt = pcap_datalink(pd);
 		ndo->ndo_if_printer = get_if_printer(ndo->ndo_dlt);
+		ndo->ndo_printf = no_printf; /* Override the printf function to suppress printing */
 		callback = capture_packet_overview;
 		pcap_userdata = (u_char *)ndo;
 	} else {
