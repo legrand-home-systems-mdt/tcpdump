@@ -3169,6 +3169,9 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 
 	if (h && sp && user) {
 		ndo = (netdissect_options*)user;
+		
+		// Need to print for now to be able to get ndo_ll_hdr_len
+		pretty_print_packet(ndo, h, sp, packets_captured);
 
 		if (ndo->ndo_dlt == DLT_EN10MB) {
 			
@@ -3177,7 +3180,8 @@ capture_packet_overview(u_char *user, const struct pcap_pkthdr *h, const u_char 
 
 			capture_end_time.tv_sec = h->ts.tv_sec;
 
-			ipPacket = (const struct ip*)(sp + ETHER_HDRLEN);
+			ipPacket = (const struct ip*)(sp + ndo->ndo_ll_hdr_len);
+			
 			add_to_endpoint_statistics(
 					ipaddr_string(ndo, ipPacket->ip_src),
 					ipaddr_string(ndo, ipPacket->ip_dst),
